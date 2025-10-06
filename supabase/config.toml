@@ -1,0 +1,19 @@
+project_id = "rjovjgxxazqmqsnqchqj"
+
+[functions.google-vision-ocr]
+verify_jwt = false
+
+[functions.extract-vehicle-data]
+verify_jwt = false
+
+[functions.fill-pdf-template-1]
+verify_jwt = false
+
+[functions.fill-pdf-template-2]
+verify_jwt = false
+
+[functions.fill-pdf-template-3]
+verify_jwt = false
+
+[functions.generate-filled-pdf]
+verify_jwt = false
