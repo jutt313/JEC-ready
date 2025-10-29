@@ -11,6 +11,42 @@ import { toast } from '@/hooks/use-toast';
 import JapaneseDatePicker from '@/components/JapaneseDatePicker';
 import { PDFDocument, TextAlignment } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
+// Helper: wrap text into multiple lines to fit PDF fields better
+const wrapText = (text: string, maxPerLine: number, maxLines: number) => {
+  if (!text) return '';
+  const t = text.replace(/\s+/g, ' ').trim();
+  const words = t.split(' ');
+  const lines: string[] = [];
+  let current = '';
+  for (const w of words) {
+    if ((current + (current ? ' ' : '') + w).length <= maxPerLine) {
+      current = current ? current + ' ' + w : w;
+    } else {
+      if (current) lines.push(current);
+      current = w;
+      if (lines.length >= maxLines - 1) break;
+    }
+  }
+  if (lines.length < maxLines && current) lines.push(current);
+  const consumed = lines.join(' ').length;
+  if (consumed < t.length && lines.length) {
+    const rest = t.slice(consumed).trim();
+    if (rest) {
+      lines[lines.length - 1] = (lines[lines.length - 1] + ' ' + rest).trim();
+    }
+  }
+  return lines.join('\n');
+};
+// PDF.js for converting first PDF page to image for OCR (Vite-friendly ESM imports)
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 interface UploadedFile {
   file: File;
@@ -154,8 +190,8 @@ const VehicleUploadInterface: React.FC<VehicleUploadInterfaceProps> = ({ company
 
     // Field removed in template 1: 'cumpany name in katakana'
     // Keep Kanji name and address
-    form.getTextField('companyy name in kanji').setText(companyData.name_kanji || '');
-    form.getTextField('company address').setText(companyData.address_japanese || '');
+    form.getTextField('companyy name in kanji').setText(wrapText(companyData.name_kanji || '', 14, 2));
+    form.getTextField('company address').setText(wrapText(companyData.address_japanese || '', 21, 3));
     // Field removed in template 1: 'company phone number or personal'
 
     const jushoCode = companyData.juso_code || '';
@@ -249,8 +285,8 @@ const VehicleUploadInterface: React.FC<VehicleUploadInterfaceProps> = ({ company
 
     // Field removed in template 2: 'cumpany name in katakana'
     // Keep Kanji name and address
-    form.getTextField('companyy name in kanji').setText(companyData.name_kanji || '');
-    form.getTextField('company address').setText(companyData.address_japanese || '');
+    form.getTextField('companyy name in kanji').setText(wrapText(companyData.name_kanji || '', 14, 2));
+    form.getTextField('company address').setText(wrapText(companyData.address_japanese || '', 21, 3));
     // Field removed in template 2: 'company phone number or personal'
 
     const vin = exportData.vin || exportData.chassis_number || '';
@@ -310,9 +346,9 @@ const VehicleUploadInterface: React.FC<VehicleUploadInterfaceProps> = ({ company
     const customFont = await pdfDoc.embedFont(fontBytes);
     const form = pdfDoc.getForm();
 
-    form.getTextField('company name in furigana').setText(companyData.name_katakana || '');
-    form.getTextField('comapnay anme in kanji').setText(companyData.name_kanji || '');
-    form.getTextField('company address').setText(companyData.address_japanese || '');
+    form.getTextField('company name in furigana').setText(wrapText(companyData.name_katakana || '', 14, 2));
+    form.getTextField('comapnay anme in kanji').setText(wrapText(companyData.name_kanji || '', 14, 2));
+    form.getTextField('company address').setText(wrapText(companyData.address_japanese || '', 21, 3));
     form.getTextField('phone number like (050) 5540 - 2026 or (070) 9114 -6677').setText(companyData.phone || '');
 
     const parsedPlate = parseJapanesePlate(exportData.plate_number || '');
@@ -482,17 +518,43 @@ const VehicleUploadInterface: React.FC<VehicleUploadInterfaceProps> = ({ company
 
       // Step 4: Convert file to base64 for OCR
       console.log(`Step 4: Converting file to base64...`);
-      const base64Data = await fileToBase64(uploadedFile.file);
-      console.log(`Base64 conversion complete, length: ${base64Data.length} characters`);
+      let base64Data = '';
+      if (uploadedFile.file.type === 'application/pdf') {
+        // Verify magic header to ensure it's a real PDF; some files may be images mislabeled as PDF
+        const header = new Uint8Array(await uploadedFile.file.slice(0, 5).arrayBuffer());
+        const isRealPdf = header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46 && header[4] === 0x2D; // %PDF-
+
+        if (isRealPdf) {
+          console.log('Detected real PDF. Rendering first page to image for OCR...');
+          try {
+            base64Data = await pdfFirstPageToPngBase64(uploadedFile.file);
+            console.log(`PDF first page rendered to image. Base64 length: ${base64Data.length} characters`);
+          } catch (e) {
+            console.error('Failed to render PDF to image:', e);
+            throw new Error('Failed to process PDF for OCR. Please ensure the PDF is not encrypted or corrupted.');
+          }
+        } else {
+          console.warn('File has .pdf extension but is not a valid PDF. Treating as image for OCR.');
+          base64Data = await fileToBase64(uploadedFile.file);
+          console.log(`Base64 conversion complete (non-PDF masquerade), length: ${base64Data.length} characters`);
+        }
+      } else {
+        base64Data = await fileToBase64(uploadedFile.file);
+        console.log(`Base64 conversion complete, length: ${base64Data.length} characters`);
+      }
 
       // Step 5: Call Google Vision OCR (with client-side retries if kana missing)
       console.log(`Step 5: Calling Google Vision OCR...`);
       const hasPlatePattern = (t: string) => {
-        const lineRe = /^(?:[\u4e00-\u9faf\u3040-\u309f\u30a0-\u30ff]+)\s+[0-9A-Z]{1,4}\s+[\u3040-\u309F]\s+\d{1,4}$/u;
-        return t
-          .split(/\r?\n/)
-          .map((l) => l.trim().replace(/\s+/g, ' '))
-          .some((line) => lineRe.test(line));
+        const normalize = (s: string) =>
+          s
+            .replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xFF10 + 0x30))
+            .replace(/[・・‐‑‒–—―ー・\.\-]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toUpperCase();
+        const lineRe = /([\u4e00-\u9faf\u3040-\u309f\u30a0-\u30ff]+)\s+([0-9A-Z]{1,4})\s+([\u3040-\u309F])\s+([0-9]{1,4})/u;
+        return t.split(/\r?\n/).some((raw) => lineRe.test(normalize(raw)));
       };
 
       let ocrText = '';
@@ -511,6 +573,8 @@ const VehicleUploadInterface: React.FC<VehicleUploadInterfaceProps> = ({ company
         if (ocrResponse.error) {
           lastOcrError = ocrResponse.error;
           console.error(`OCR failed (attempt ${attempts}):`, ocrResponse.error);
+          // Stop retrying if server returned non-2xx (e.g., 400/422)
+          break;
         } else {
           ocrText = ocrResponse.data?.extractedText || '';
           console.log(`OCR completed, extracted text length: ${ocrText.length}`);
@@ -525,6 +589,13 @@ const VehicleUploadInterface: React.FC<VehicleUploadInterfaceProps> = ({ company
         if (attempts < 3) await new Promise((r) => setTimeout(r, 400));
       }
 
+      if (lastOcrError) {
+        const msg = lastOcrError.message || 'OCR failed.';
+        updateFileStatus(uploadedFile.id, 'failed', 0, undefined, { error: msg });
+        toast({ title: 'OCR Failed', description: msg, variant: 'destructive' });
+        return;
+      }
+
       if (!ocrText || !hasPlatePattern(ocrText)) {
         updateFileStatus(uploadedFile.id, 'failed', 0, undefined, { error: 'Plate kana not detected. Please upload a clearer image.' });
         toast({ title: 'OCR Failed', description: 'License plate kana not detected. Please upload a clearer image.', variant: 'destructive' });
@@ -537,7 +608,7 @@ const VehicleUploadInterface: React.FC<VehicleUploadInterfaceProps> = ({ company
       console.log(`Step 6: Calling AI extraction...`);
       const extractionResponse = await supabase.functions.invoke('extract-vehicle-data', {
         body: {
-          ocrText: ocrResponse.data.extractedText,
+          ocrText: ocrText,
           exportRequestId: exportRequest.id
         }
       });
@@ -547,6 +618,15 @@ const VehicleUploadInterface: React.FC<VehicleUploadInterfaceProps> = ({ company
       if (extractionResponse.error) {
         console.error(`AI extraction failed:`, extractionResponse.error);
         throw new Error(`AI extraction failed: ${extractionResponse.error.message}`);
+      }
+
+      // Handle structured 200 error from function
+      if (extractionResponse.data && extractionResponse.data.success === false) {
+        const msg = extractionResponse.data.error || 'AI extraction failed.';
+        console.error('AI extraction reported failure:', msg);
+        updateFileStatus(uploadedFile.id, 'failed', 0, undefined, { error: msg });
+        toast({ title: 'AI Extraction Failed', description: msg, variant: 'destructive' });
+        return;
       }
 
       console.log(`AI extraction completed successfully!`);
@@ -596,10 +676,28 @@ const VehicleUploadInterface: React.FC<VehicleUploadInterfaceProps> = ({ company
     });
   };
 
+  // Convert first page of a PDF to PNG base64 (without data URL prefix)
+  const pdfFirstPageToPngBase64 = async (file: File): Promise<string> => {
+    const arrayBuffer = await file.arrayBuffer();
+    const loadingTask = getDocument({ data: arrayBuffer });
+    const pdf = await loadingTask.promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: ctx as CanvasRenderingContext2D, viewport }).promise;
+    // Use JPEG to improve Vision compatibility and reduce payload size
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+    return dataUrl.split(',')[1];
+  };
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']
+      'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'],
+      'application/pdf': ['.pdf']
     },
     multiple: true
   });
@@ -707,7 +805,7 @@ const VehicleUploadInterface: React.FC<VehicleUploadInterfaceProps> = ({ company
               複数のファイルを同時にアップロード可能 / Multiple files can be uploaded simultaneously
             </p>
             <p className="text-xs text-muted-foreground mt-2">
-              対応形式: PNG, JPG, JPEG, GIF, BMP, WEBP / Supported formats: PNG, JPG, JPEG, GIF, BMP, WEBP
+              対応形式: PNG, JPG, JPEG, GIF, BMP, WEBP, PDF / Supported: PNG, JPG, JPEG, GIF, BMP, WEBP, PDF
             </p>
           </div>
         </CardContent>

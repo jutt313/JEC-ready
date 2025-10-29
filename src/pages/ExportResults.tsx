@@ -8,6 +8,35 @@ import { toReiwaFormat } from '@/lib/japanese-date';
 import { PDFDocument, TextAlignment } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 
+// Helper: wrap text into multiple lines to fit PDF fields better
+const wrapText = (text: string, maxPerLine: number, maxLines: number) => {
+  if (!text) return '';
+  const t = text.replace(/\s+/g, ' ').trim();
+  const words = t.split(' ');
+  const lines: string[] = [];
+  let current = '';
+  for (const w of words) {
+    if ((current + (current ? ' ' : '') + w).length <= maxPerLine) {
+      current = current ? current + ' ' + w : w;
+    } else {
+      if (current) lines.push(current);
+      current = w;
+      if (lines.length >= maxLines - 1) break;
+    }
+  }
+  if (lines.length < maxLines && current) lines.push(current);
+  // If still leftover words, append them into last line without truncation to preserve info
+  const consumed = lines.join(' ').length;
+  if (consumed < t.length && lines.length) {
+    const rest = t.slice(consumed).trim();
+    if (rest) {
+      // Try to append rest to last line separated by space
+      lines[lines.length - 1] = (lines[lines.length - 1] + ' ' + rest).trim();
+    }
+  }
+  return lines.join('\n');
+};
+
 interface ExportData {
   id: string;
   request_number: string;
@@ -111,9 +140,9 @@ const ExportResults = () => {
     });
 
     // Field removed in template 1: 'cumpany name in katakana'
-    // Keep Kanji name and address
-    form.getTextField('companyy name in kanji').setText(companyData.name_kanji || '');
-    form.getTextField('company address').setText(companyData.address_japanese || '');
+    // Keep Kanji name and address (fit for long values)
+    form.getTextField('companyy name in kanji').setText(wrapText(companyData.name_kanji || '', 14, 2));
+    form.getTextField('company address').setText(wrapText(companyData.address_japanese || '', 21, 3));
     // Field removed in template 1: 'company phone number or personal'
 
     const jushoCode = companyData.juso_code || '';
@@ -208,9 +237,9 @@ const ExportResults = () => {
     });
 
     // Field removed in template 2: 'cumpany name in katakana'
-    // Keep Kanji name and address
-    form.getTextField('companyy name in kanji').setText(companyData.name_kanji || '');
-    form.getTextField('company address').setText(companyData.address_japanese || '');
+    // Keep Kanji name and address (fit for long values)
+    form.getTextField('companyy name in kanji').setText(wrapText(companyData.name_kanji || '', 14, 2));
+    form.getTextField('company address').setText(wrapText(companyData.address_japanese || '', 21, 3));
     // Field removed in template 2: 'company phone number or personal'
 
     const vin = exportData.vin || exportData.chassis_number || '';
@@ -272,9 +301,9 @@ const ExportResults = () => {
     const customFont = await pdfDoc.embedFont(fontBytes);
     const form = pdfDoc.getForm();
 
-    form.getTextField('company name in furigana').setText(companyData.name_katakana || '');
-    form.getTextField('comapnay anme in kanji').setText(companyData.name_kanji || '');
-    form.getTextField('company address').setText(companyData.address_japanese || '');
+    form.getTextField('company name in furigana').setText(wrapText(companyData.name_katakana || '', 14, 2));
+    form.getTextField('comapnay anme in kanji').setText(wrapText(companyData.name_kanji || '', 14, 2));
+    form.getTextField('company address').setText(wrapText(companyData.address_japanese || '', 21, 3));
     form.getTextField('phone number like (050) 5540 - 2026 or (070) 9114 -6677').setText(companyData.phone || '');
 
     const parsedPlate = parseJapanesePlate(exportData.plate_number || '');

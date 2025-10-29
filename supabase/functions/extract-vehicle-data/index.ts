@@ -74,36 +74,60 @@ CRITICAL EXTRACTION RULES:
 5. If you cannot find a field with 100% confidence, use null
 6. Do NOT guess or approximate - only extract what you can clearly identify`;
 
-    // Call OpenAI API to extract vehicle data
-    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: systemPrompt
-          },
-          {
-            role: 'user',
-            content: 'Extract the vehicle registration number and chassis number from this OCR text from a Japanese vehicle inspection certificate:\n\nFULL OCR TEXT:\n' + ocrText + '\n\nIMPORTANT: Make sure the license plate includes the hiragana character between the alphanumeric part and the final numbers. The middle part can contain both letters and numbers like "30B" or "A12".\nReturn only the JSON response with the extracted data.'
-          }
-        ],
-        temperature: 0,
-        max_tokens: 200
-      }),
-    });
+    // Call OpenAI API with a simple retry (once) for transient errors
+    let openaiResponse: Response | null = null;
+    let lastErrText = '';
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            {
+              role: 'user',
+              content: 'Extract the vehicle registration number and chassis number from this OCR text from a Japanese vehicle inspection certificate:\n\nFULL OCR TEXT:\n' + ocrText + '\n\nIMPORTANT: Make sure the license plate includes the hiragana character between the alphanumeric part and the final numbers. The middle part can contain both letters and numbers like "30B" or "A12".\nReturn only the JSON response with the extracted data.'
+            }
+          ],
+          temperature: 0,
+          max_tokens: 200
+        }),
+      });
 
-    console.log(`📡 [AI] OpenAI API response status: ${openaiResponse.status}`);
+      console.log(`📡 [AI] OpenAI API response status (attempt ${attempt}): ${openaiResponse.status}`);
+      if (openaiResponse.ok) break;
+      lastErrText = await openaiResponse.text().catch(() => '');
+      console.warn(`⚠️ [AI] OpenAI error (attempt ${attempt}):`, lastErrText);
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 500));
+    }
 
-    if (!openaiResponse.ok) {
-      const errorText = await openaiResponse.text();
-      console.error('❌ [AI] OpenAI API Error:', errorText);
-      throw new Error(`OpenAI API error: ${openaiResponse.status} - ${errorText}`);
+    if (!openaiResponse || !openaiResponse.ok) {
+      const message = lastErrText || 'OpenAI API request failed';
+      console.error('❌ [AI] OpenAI final error:', message);
+      // Update DB to failed but return 200 with structured payload so UI can show a clear message
+      try {
+        const supabaseClient = createClient(
+          Deno.env.get('SUPABASE_URL') ?? '',
+          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+        );
+        await supabaseClient
+          .from('export_requests')
+          .update({
+            status: 'failed',
+            processing_errors: { error: message, at: new Date().toISOString(), stage: 'ai_extract' },
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', exportRequestId);
+      } catch (_) {}
+
+      return new Response(
+        JSON.stringify({ success: false, error: message }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const openaiData = await openaiResponse.json();
