@@ -76,10 +76,10 @@ const Index = () => {
       {/* Header */}
       <header className="relative z-10 px-6 py-4 bg-background/80 backdrop-blur-sm border-b border-border/50">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-3 animate-fade-in">
+          <div className="flex items-center space-x-3">
             <img src={jecLogo} alt="JEC Logo" className="h-12 w-auto" />
           </div>
-          <div className="flex items-center space-x-4 animate-fade-in">
+          <div className="flex items-center space-x-4">
             <Button 
               variant="ghost" 
               onClick={() => navigate('/login')}
@@ -101,20 +101,20 @@ const Index = () => {
       {/* Hero Section */}
       <section className="relative px-6 py-20 lg:py-32">
         <div className="max-w-7xl mx-auto text-center">
-          <div className="animate-fade-in">
+          <div>
             <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold text-foreground mb-8 leading-tight">
-              <span className="block text-primary animate-scale-in">Export made</span>
-              <span className="block animate-scale-in" style={{animationDelay: '0.2s'}}>Simple.</span>
+              <span className="block text-primary">Export made</span>
+              <span className="block">Simple.</span>
             </h1>
-            <p className="text-xl md:text-2xl text-muted-foreground mb-12 max-w-3xl mx-auto animate-fade-in" style={{animationDelay: '0.4s'}}>
+            <p className="text-xl md:text-2xl text-muted-foreground mb-12 max-w-3xl mx-auto">
               日本車輸出証明書の作成を簡単に。AIを活用した自動化により、複雑な手続きを数分で完了。
             </p>
-            <p className="text-lg md:text-xl text-muted-foreground/80 mb-12 max-w-3xl mx-auto animate-fade-in" style={{animationDelay: '0.6s'}}>
+            <p className="text-lg md:text-xl text-muted-foreground/80 mb-12 max-w-3xl mx-auto">
               Simplify Japanese vehicle export certification. Complete complex procedures in minutes with AI-powered automation.
             </p>
           </div>
           
-          <div className="animate-fade-in" style={{animationDelay: '0.8s'}}>
+          <div>
             <Button 
               size="lg" 
               onClick={() => navigate('/signup')}
@@ -125,12 +125,8 @@ const Index = () => {
             </Button>
           </div>
         </div>
-
-        {/* Floating elements */}
-        <div className="absolute top-20 left-10 w-20 h-20 bg-primary/10 rounded-full animate-pulse" style={{animationDelay: '1s'}}></div>
-        <div className="absolute bottom-32 right-10 w-16 h-16 bg-secondary/10 rounded-full animate-pulse" style={{animationDelay: '1.5s'}}></div>
-        <div className="absolute top-40 right-20 w-12 h-12 bg-accent/10 rounded-full animate-pulse" style={{animationDelay: '2s'}}></div>
       </section>
+      
 
       {/* Features Section */}
       <section className="px-6 py-20 bg-background/50 backdrop-blur-sm">
